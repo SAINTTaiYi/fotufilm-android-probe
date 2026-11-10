@@ -1,14 +1,12 @@
 name: android-engine
 
-# Builds DhaliwalX/fotufilm-engine's Android Vulkan engine (libfotufilm.so, arm64-v8a)
-# on an x86_64 runner, because the phone cannot build it: Halide needs a from-source
-# LLVM 21+ and the Swift engine is cross-compiled.
+# Builds DhaliwalX/fotufilm-engine's Android engine (libfotufilm.so, arm64-v8a) on
+# an x86_64 runner. The phone cannot do it: Halide wants a from-source LLVM 21+
+# and the Swift engine wants a swift.org toolchain + Swift SDK for Android, none
+# of which exist for aarch64-bionic.
 #
-# Order matters: everything cheap and fallible (Swift downloads) runs before the hour-long
-# Halide build, so a wrong URL costs three minutes rather than forty-five.
-#
-# Nothing from their tree is redistributed here -- the job checks out a pinned commit
-# and uploads only the built artefacts.
+# Order is deliberate: every cheap, easy-to-get-wrong step runs before the
+# expensive ones, so a bad URL costs a minute instead of an hour.
 
 on:
   workflow_dispatch:
@@ -16,17 +14,31 @@ on:
     branches: [ main ]
 
 env:
-  FOTUFILM_REF: b9049f3e8897a51ab8f917edb39f023cb340d2e2
   FOTUFILM_REPO: DhaliwalX/fotufilm-engine
+  # The tree this probe was written against. Moving it means re-reading the
+  # build scripts, not just bumping a number.
+  FOTUFILM_REF: b9049f3e8897a51ab8f917edb39f023cb340d2e2
+  # v22.0.0.dev0-408; tools/desktop-build-config.sh's five Vulkan patches apply
+  # to this pin and nothing else.
+  HALIDE_PIN: 58868f0c7106f8e1214c8ae14f55e3157659b8e0
   SWIFT_VER: 6.3.3
   SWIFT_SDK_NAME: swift-6.3.3-RELEASE_android
+  # Not `android/`: that segment 404s. The SDK lives under `android-sdk/`, with
+  # the release name repeated inside the path.
+  SWIFT_SDK_URL: https://download.swift.org/swift-6.3.3-release/android-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_android.artifactbundle.tar.gz
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 350
+    timeout-minutes: 350          # GitHub's hard cap is 360
+
     steps:
-      - name: checkout fotufilm at the pinned commit, with the Halide submodule
+      - name: machine
+        run: |
+          nproc; free -g | head -2; df -h / | tail -1
+          echo "NDK=$ANDROID_NDK_LATEST_HOME"; ls "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt"
+
+      - name: checkout fotufilm at the pinned commit + Halide submodule
         uses: actions/checkout@v4
         with:
           repository: ${{ env.FOTUFILM_REPO }}
@@ -35,125 +47,166 @@ jobs:
           fetch-depth: 0
           path: src
 
-      - name: probe
+      # --- 1. the toolchains the two halves need ---------------------------------
+      - name: llvm 21, lld, vulkan headers, ninja
         run: |
-          echo "--- halide pin ---"
-          git -C src ls-tree HEAD third_party/Halide
-          git -C src submodule status --recursive || true
-          echo "--- ndk ---"
-          echo "ANDROID_NDK_LATEST_HOME=$ANDROID_NDK_LATEST_HOME"
-          ls "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt" 2>/dev/null || true
-          echo "--- swift sdk names on the mirror (if it lists) ---"
-          curl -sS --max-time 20 "https://download.swift.org/swift-${SWIFT_VER}-release/android/" | head -40 || true
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/llvm.asc > /dev/null
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm21.list
+          sudo apt-get update -qq
+          # liblld-21-dev is the one that is easy to miss: Halide's
+          # FindHalide_LLVM looks for a WebAssembly component and only finds it
+          # when LLD's CMake files are installed. Without it the configure step
+          # dies with "liblld is missing", which reads like an LLVM problem.
+          sudo apt-get install -y -qq \
+            llvm-21-dev liblld-21-dev lld-21 clang-21 libclang-21-dev \
+            libzstd-dev zlib1g-dev libvulkan-dev vulkan-headers \
+            cmake ninja-build pkg-config nasm yasm autoconf automake libtool \
+            libxml2-dev libffi-dev libedit-dev libncurses-dev libsqlite3-dev \
+            libcurl4-openssl-dev libdigest-sha-perl zip
+          echo "LLVM_ROOT=/usr/lib/llvm-21" >> "$GITHUB_ENV"
+          "/usr/lib/llvm-21/bin/llvm-config" --version
+          ls /usr/lib/llvm-21/lib/cmake/ | tr '\n' ' '
 
-      - name: swift toolchain
+      - name: swift 6.3.3 toolchain
         run: |
-          set -e
           cd "$RUNNER_TEMP"
-          curl -fsSL -o swift.tar.gz \
+          curl -fSL --retry 5 --retry-delay 5 --retry-all-errors -o swift.tar.gz \
             "https://download.swift.org/swift-${SWIFT_VER}-release/ubuntu2204/swift-${SWIFT_VER}-RELEASE/swift-${SWIFT_VER}-RELEASE-ubuntu22.04.tar.gz"
-          mkdir -p swift
-          tar xzf swift.tar.gz -C swift --strip-components=1
+          mkdir -p swift && tar xzf swift.tar.gz -C swift --strip-components=1
           echo "SWIFT_TOOLCHAIN=$RUNNER_TEMP/swift" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/swift/usr/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/swift/usr/bin/swift" --version
 
-      - name: swift SDK for android (first candidate that answers)
+      - name: cache the swift android sdk
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.swiftpm/swift-sdks
+          key: swift-android-sdk-${{ env.SWIFT_VER }}-v1
+
+      # The tarball's top level is exactly `$SWIFT_SDK_NAME.artifactbundle/`, so
+      # extracting into ~/.swiftpm/swift-sdks lands on the path
+      # tools/build-android-engine.sh reads. No `swift sdk install` — it goes
+      # through the CDN redirect and is unreliable in CI.
+      - name: swift sdk for android
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
-          set -e
-          cd "$RUNNER_TEMP"
-          BASE="https://download.swift.org/swift-${SWIFT_VER}-release"
-          CANDIDATES="
-          $BASE/android/swift-${SWIFT_VER}-RELEASE_android.artifactbundle.tar.gz
-          $BASE/android/${SWIFT_VER}-RELEASE/swift-${SWIFT_VER}-RELEASE_android.artifactbundle.tar.gz
-          $BASE/android/swift-${SWIFT_VER}-RELEASE-android.artifactbundle.tar.gz
-          https://github.com/swiftlang/swift-android-sdk/releases/download/${SWIFT_VER}/swift-${SWIFT_VER}-RELEASE_android.artifactbundle.tar.gz
-          "
-          GOT=""
-          for u in $CANDIDATES; do
-            code=$(curl -sSL -o android-sdk.tar.gz -w '%{http_code}' --max-time 600 "$u" || true)
-            echo "$code  $u"
-            if [ "$code" = "200" ]; then GOT="$u"; break; fi
-          done
-          [ -n "$GOT" ] || { echo "::error::no Swift SDK for Android downloaded -- fix the candidate list"; exit 1; }
           mkdir -p "$HOME/.swiftpm/swift-sdks"
-          tar xzf android-sdk.tar.gz -C "$HOME/.swiftpm/swift-sdks"
-          ls -d "$HOME"/.swiftpm/swift-sdks/* | head
-          # the build script looks for exactly this directory name
-          D=$(ls -d "$HOME"/.swiftpm/swift-sdks/* | head -1)
-          T="$HOME/.swiftpm/swift-sdks/${SWIFT_SDK_NAME}.artifactbundle"
-          [ "$(basename "$D")" = "$(basename "$T")" ] || mv "$D" "$T"
-          ls -d "$T"/* | head
-          export PATH="$SWIFT_TOOLCHAIN/usr/bin:$PATH"
-          swift sdk list || true
+          cd "$RUNNER_TEMP"
+          curl -fSL --retry 5 --retry-delay 5 --retry-all-errors -o sdk.tar.gz "$SWIFT_SDK_URL"
+          ls -l sdk.tar.gz
+          tar xzf sdk.tar.gz -C "$HOME/.swiftpm/swift-sdks"
+          ls -d "$HOME/.swiftpm/swift-sdks/"*.artifactbundle
 
-      - name: llvm 21, clang, lld, vulkan headers, ninja
+      - name: prove the sdk is where the build script looks
         run: |
-          set -x
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
-            | sudo tee /etc/apt/trusted.gpg.d/llvm.asc > /dev/null
-          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" \
-            | sudo tee /etc/apt/sources.list.d/llvm21.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq llvm-21-dev clang-21 lld-21 libclang-21-dev \
-            libzstd-dev zlib1g-dev libvulkan-dev cmake ninja-build
-          /usr/lib/llvm-21/bin/llvm-config --version
-          echo "LLVM_ROOT=/usr/lib/llvm-21" >> "$GITHUB_ENV"
-          echo "LLD_ROOT=/usr/lib/llvm-21" >> "$GITHUB_ENV"
+          B="$HOME/.swiftpm/swift-sdks/$SWIFT_SDK_NAME.artifactbundle/swift-android"
+          test -d "$B" || { echo "no bundle at $B"; ls -R "$HOME/.swiftpm/swift-sdks" | head -40; exit 1; }
+          test -f "$B/scripts/setup-android-sdk.sh" || { echo "no setup script"; exit 1; }
+          test -f "$B/swift-resources/usr/lib/swift-aarch64/android/aarch64/swiftrt.o" \
+            || { echo "no swiftrt.o"; find "$B" -name swiftrt.o | head; exit 1; }
+          echo "SWIFT_SDK=$SWIFT_SDK_NAME" >> "$GITHUB_ENV"
+          echo ok
 
+      # --- 2. the expensive halves, both cached ----------------------------------
       - name: cache halide
         id: halide-cache
         uses: actions/cache@v4
         with:
           path: src/build/halide-linux-install
-          key: halide-${{ env.FOTUFILM_REF }}-llvm21-v1
+          key: halide-${{ env.HALIDE_PIN }}-llvm21-v1
 
-      - name: halide, pinned + the five vulkan patches
+      - name: halide (pinned + the five vulkan patches)
         if: steps.halide-cache.outputs.cache-hit != 'true'
         working-directory: src
         run: |
-          # reads the pin from git, applies strict-float / bool-uniforms /
-          # allocation-padding / readback-staging / runtime-prefix-map
-          bash tools/build-halide-linux.sh
+          git submodule update --init third_party/Halide
+          tools/build-halide-linux.sh
+          echo "HALIDE_ROOT=$PWD/build/halide-linux-install" >> "$GITHUB_ENV"
 
-      - name: android AOT kernels (arm64, vulkan)
-        working-directory: src
-        env:
-          HALIDE_ROOT: ${{ github.workspace }}/src/build/halide-linux-install
-          FOTUFILM_AOT_JOBS: 8
+      - name: halide root from cache
+        if: steps.halide-cache.outputs.cache-hit == 'true'
         run: |
-          ls -l "$HALIDE_ROOT/lib" | head
-          bash tools/generate-halide-aot-android.sh
-          ls -l build/halide-android-arm64 | head -20
+          echo "HALIDE_ROOT=$GITHUB_WORKSPACE/src/build/halide-linux-install" >> "$GITHUB_ENV"
+          ls "$GITHUB_WORKSPACE/src/build/halide-linux-install/lib" | head
 
-      - name: android codecs
+      - name: cache halide android kernels
+        id: kernels-cache
+        uses: actions/cache@v4
+        with:
+          path: src/build/halide-android-arm64
+          key: halide-android-${{ env.HALIDE_PIN }}-v1
+
+      - name: android aot kernels (arm64 + vulkan)
+        working-directory: src
+        run: |
+          tools/generate-halide-aot-android.sh
+          ls -l build/halide-android-arm64/*.a | head
+
+      # --- 3. the codecs --------------------------------------------------------
+      # FFmpeg is not optional here even though this probe only wants photos:
+      # every file in Sources/CFotufilmVideo is wrapped in
+      # `#if __has_include(<libavformat/avformat.h>)` with no #else, so without
+      # its headers ffv_available / ffv_last_error / ffv_free are never defined
+      # -- and Sources/FotufilmHost/HostVideo+FFmpeg.swift still calls them,
+      # because fotufilm_video.h includes nothing but stddef/stdint and so
+      # canImport(CFotufilmVideo) is true. The shared object links anyway
+      # (undefined symbols are legal in a .so) and then fails to dlopen.
+      # So: build it, and cache the result.
+      - name: cache android codecs
+        id: codecs-cache
+        uses: actions/cache@v4
+        with:
+          path: src/build/android-deps
+          key: android-deps-v1
+
+      - name: android codecs + ffmpeg
+        if: steps.codecs-cache.outputs.cache-hit != 'true'
         working-directory: src
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
           FOTUFILM_ANDROID_DEPS: ${{ github.workspace }}/src/build/android-deps
         run: |
-          bash tools/build-android-codecs.sh
-          ls -l build/android-deps/arm64/lib | head -20
+          tools/build-android-codecs.sh
+          ls -l build/android-deps/arm64/lib | head -24
 
+      # --- 4. the engine --------------------------------------------------------
       - name: libfotufilm.so
         working-directory: src
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
-          HALIDE_ROOT: ${{ github.workspace }}/src/build/halide-linux-install
           FOTUFILM_ANDROID_DEPS: ${{ github.workspace }}/src/build/android-deps
         run: |
-          bash tools/build-android-engine.sh
-          find flutter/build/android-engine -name '*.so' -exec ls -l {} \;
+          tools/build-android-engine.sh
+          echo "--- jniLibs ---"
+          ls -l flutter/build/android-engine/jniLibs/arm64-v8a/
+          echo "--- assets ---"
+          ls flutter/build/android-engine/assets/fotufilm | head -12
+          test -f flutter/build/android-engine/jniLibs/arm64-v8a/libfotufilm.so \
+            || { echo "no libfotufilm.so"; exit 1; }
+          du -sh flutter/build/android-engine
 
+      # --- 5. ship it -----------------------------------------------------------
       - name: collect
         run: |
-          set -e
           mkdir -p out
-          cp -a src/flutter/build/android-engine/. out/
-          du -sh out
-          find out -name '*.so' -exec ls -l {} \;
+          cp -a src/flutter/build/android-engine/jniLibs out/
+          cp -a src/flutter/build/android-engine/assets out/
+          mkdir -p out/include
+          cp src/Sources/CFotufilmHost/include/fotufilm.h out/include/
+          # What the shim was built against, so the shell can be matched to it.
+          { echo "fotufilm ref: $FOTUFILM_REF"
+            echo "halide pin:   $HALIDE_PIN"
+            echo "llvm:         $(/usr/lib/llvm-21/bin/llvm-config --version)"
+            echo "swift:        $("$SWIFT_TOOLCHAIN/usr/bin/swift" --version 2>&1 | head -2)"
+            echo "ndk:          $ANDROID_NDK_LATEST_HOME"
+            echo "built:        $(date -u +%FT%TZ)"
+          } > out/BUILD-INFO.txt
+          cat out/BUILD-INFO.txt
+          du -sh out; find out -name '*.so' -exec ls -l {} \;
           cd out && zip -qry ../fotufilm-android-engine.zip .
-          ls -l ../fotufilm-android-engine.zip
 
       - uses: actions/upload-artifact@v4
         with:
