@@ -147,6 +147,63 @@ jobs:
           tools/generate-halide-aot-android.sh
           ls -l build/halide-android-arm64/*.a | head
 
+      # The Vulkan half is the only developer the upstream Android build links,
+      # and `FotufilmHalideLinux.cpp` hardcodes `fotufilm_halide_available()` to
+      # 0 because of it. If a driver refuses Halide's compute pipelines there is
+      # then nothing to fall back to. So this adds the CPU half as well:
+      #  * the ARM64 CPU kernels (generate_halide_android.cpp, --no-runtime so it
+      #    shares the Vulkan build's Halide runtime instead of clashing with it),
+      #    generated into the same directory so build-android-engine.sh's
+      #    "$KERNELS"/*.a picks them up;
+      #  * FotufilmHalideAndroid.cpp compiled beside the Linux shim, with the two
+      #    symbols both define renamed out of the way;
+      #  * and the GPU shim's `available` flipped to 1, which is what makes
+      #    HostEngine choose HalideCPUDeveloper when FOTUFILM_GPU_DEVICE=cpu.
+      - name: android cpu kernels + a developer that needs no GPU
+        working-directory: src
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -I"$HALIDE_ROOT/include" -ISources/FotufilmHalide/include \
+            tools/generate_halide_android.cpp \
+            -L"$HALIDE_ROOT/lib" -lHalide -Wl,-rpath,"$HALIDE_ROOT/lib" \
+            -o build/generate-android-cpu
+          build/generate-android-cpu build/halide-android-arm64 --no-runtime
+          ls -l build/halide-android-arm64/*.a | head
+
+          python3 - <<'PY2'
+          import io
+          # 1. the GPU shim stops claiming there is no Halide at all
+          p = 'Sources/FotufilmHalide/FotufilmHalideLinux.cpp'
+          s = io.open(p, encoding='utf-8').read()
+          old = 'extern "C" int32_t fotufilm_halide_available(void) { return 0; }'
+          new = 'extern "C" int32_t fotufilm_halide_available(void) { return 1; }'
+          assert s.count(old) == 1, s.count(old)
+          io.open(p, 'w', encoding='utf-8').write(s.replace(old, new))
+
+          # 2. the build compiles the CPU shim too, and links it
+          p = 'tools/build-android-engine.sh'
+          s = io.open(p, encoding='utf-8').read()
+          anchor = '  Sources/FotufilmHalide/FotufilmHalideLinux.cpp -o "$OBJ/FotufilmHalideLinux.o"\n'
+          assert s.count(anchor) == 1, s.count(anchor)
+          extra = anchor + (
+              '# The CPU developer: same Halide runtime, kernels compiled for ARM64\n'
+              '# without a device. The two symbols it shares with the Linux shim are\n'
+              '# renamed so both can live in one .so.\n'
+              '"$CXX" -std=c++17 "${CFLAGS_COMMON[@]}" -c -DFOTUFILM_HALIDE_ANDROID_AOT=1 \n'
+              '  -Dfotufilm_halide_available=fotufilm_halide_available_cpu \n'
+              '  -Dfotufilm_halide_set_film_tiles=fotufilm_halide_set_film_tiles_cpu \n'
+              '  -I"$KERNELS" -ISources/FotufilmHalide/include -ISources/FotufilmHalide \n'
+              '  Sources/FotufilmHalide/FotufilmHalideAndroid.cpp -o "$OBJ/FotufilmHalideAndroid.o"\n')
+          s = s.replace(anchor, extra)
+          link = '  "$OBJ/FotufilmHost.o" "$OBJ/FotufilmHalideLinux.o" "$OBJ"/codecs-*.o "$OBJ"/video-*.o \n'
+          assert s.count(link) == 1, s.count(link)
+          s = s.replace(link,
+              '  "$OBJ/FotufilmHost.o" "$OBJ/FotufilmHalideLinux.o" "$OBJ/FotufilmHalideAndroid.o" \n'
+              '  "$OBJ"/codecs-*.o "$OBJ"/video-*.o \n')
+          io.open(p, 'w', encoding='utf-8').write(s)
+          print('patched')
+          PY2
+
       # --- 3. the codecs --------------------------------------------------------
       # FFmpeg is not optional here even though this probe only wants photos:
       # every file in Sources/CFotufilmVideo is wrapped in
