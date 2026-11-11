@@ -41,7 +41,12 @@ DUMP = r'''        // A C++ host re-deriving the pixel-spaced slots for another 
             // with the frame size, the second is read at a millimetre clump and does not either,
             // and only the pixel spacing between them changes. Recomputing their product here
             // would put a different rounding in the slot than the initializer's own order.
-            record("grainAmplitude", grainStrength.map { $0 / (1 - mottleShare).squareRoot() })
+            // The amplitude without the aperture's response, which is read at a millimetre
+            // clump and folded with the pixel spacing by the host -- recomputing the product
+            // here would count the response twice.
+            record("grainAmplitude", stock.grainLayerWeights.map { weight in
+                stock.grainStrength * grainScale * weight
+            })
             record("grainApertureResponse",
                    renderedClumpMM.map { FilmStock.granularityApertureResponse(clumpSigmaMM: $0) })
             record("isSilver", stock.grainDensityLaw == .silver ? 1 : 0)
