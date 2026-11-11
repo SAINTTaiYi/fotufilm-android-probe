@@ -16,22 +16,25 @@ DUMP = '''        // A C++ host re-deriving the pixel-spaced slots for another f
         // configuration, and rounding them back out of it loses exactly what it needs.
         if let directory = ProcessInfo.processInfo.environment["FOTUFILM_BAKE_DIR"] {
             var physics = ""
-            func record(_ name: String, _ value: Float) { physics += "\\(name)=\\(value)\\n" }
+            func record(_ name: String, _ value: Float) { physics += "\(name)=\(value)\n" }
             func record(_ name: String, _ values: [Float]) {
-                for (index, value) in values.enumerated() { record("\\(name)_\\(index)", value) }
+                for (index, value) in values.enumerated() { record("\(name)_\(index)", value) }
             }
             record("pxPerMM", pxPerMM)
+            record("emulsionDiffusionMM", stock.emulsionDiffusionMM)
+            record("emulsionDiffusionSecondaryMM", stock.emulsionDiffusionSecondaryMM)
+            record("lumaDiffusionMM", stock.lumaDiffusionMM)
+            record("couplerDiffusionMM", stock.couplerDiffusionMM)
+            record("adjacencyRadiusMM", stock.adjacencyRadiusMM)
+            record("adjacencyScreened", (options.adjacencyModel ?? stock.adjacencyModel) == .screenedDiffusion ? 1 : 0)
+            record("grainClumpsPerMM2", stock.grainClumpsPerMM2)
             record("halationSigmaMM", halation.sigmaMM)
             record("halationRingRadiusMM", halation.ringRadiusMM)
             record("enlargerBlurMM", printMedium.enlargerBlurMM)
             record("enlargerScanSharpening", printMedium.scanSharpening)
-            record("enlargerSigmaPixels", enlargerSigmaPixels)
-            record("enlargerFoldPixels", enlargerFoldPixels)
-            record("enlargerFoldKeep", enlargerFoldKeep)
             record("renderedClumpMM", renderedClumpMM)
             record("renderedMottleMM", renderedMottleMM)
             record("mottleSizeRatio", mottleSizeRatio)
-            record("frameCoverage", min(max(options.frameCoverage, 0.05), 1))
             let path = (directory as NSString).appendingPathComponent("physio.txt")
             try? physics.write(toFile: path, atomically: true, encoding: .utf8)
         }
