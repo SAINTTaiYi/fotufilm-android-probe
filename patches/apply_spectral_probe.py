@@ -31,8 +31,11 @@ DUMP = r'''        if let directory = ProcessInfo.processInfo.environment["FOTUF
                     }
                 }
             }
+            // FilmStock has no id: `name` is the product name the engine ships and is unique
+            // across the pack, so it is the only stable handle a file name can use.
+            let handle = stock.name.replacingOccurrences(of: " ", with: "-")
             let path = (directory as NSString)
-                .appendingPathComponent("spectral-probe-\(stock.id).txt")
+                .appendingPathComponent("spectral-probe-\(handle).txt")
             try? probe.write(toFile: path, atomically: true, encoding: .utf8)
         }
 
