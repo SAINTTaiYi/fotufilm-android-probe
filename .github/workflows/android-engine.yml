@@ -383,6 +383,17 @@ jobs:
           # so a decode is the engine's decode -- lcms2 through D50, not a matrix
           # of our own that lands 3e-5 away from it.
           ndk_cxx="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++"
+          ndk_bin="$(dirname "$ndk_cxx")"
+          # The codecs are compiled with -fvisibility=hidden because the engine wants
+          # nothing exported; a host needs its entry points. Lift only those.
+          for o in out/codecs/*.o; do
+            syms=$("$ndk_bin/llvm-nm" -g --defined-only "$o" | awk '{print $3}' | grep '^ffc_' || true)
+            args=()
+            for s in $syms; do args+=(--set-symbol-visibility="$s=default"); done
+            if [ ${#args[@]} -gt 0 ]; then "$ndk_bin/llvm-objcopy" "${args[@]}" "$o"; fi
+          done
+          echo "--- ffc symbols now visible ---"
+          "$ndk_bin/llvm-nm" -g --defined-only out/codecs/*.o | grep -c '^[0-9a-f]* T ffc_' || true
           "$ndk_cxx" -shared -o out/libfotufilmcodecs.so \
             -Wl,--gc-sections -Wl,-soname,libfotufilmcodecs.so \
             -Wl,--start-group src/build/android-engine/obj/codecs-*.o \
