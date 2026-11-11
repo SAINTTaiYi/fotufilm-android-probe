@@ -298,15 +298,24 @@ jobs:
           #    then refuses to load ("cannot locate symbol fotufilm_aot_vulkan_color").
           compile_stubs = (
               '"$CXX" -std=c++17 "${CFLAGS_COMMON[@]}" -c -DFOTUFILM_VULKAN_STUBS=1 '
-              '-I"$KERNELS" -ISources/FotofilmHalide/include -ISources/FotufilmHalide '
+              '-I"$KERNELS" -ISources/FotufilmHalide/include -ISources/FotufilmHalide '
               '"$GITHUB_WORKSPACE/probe/patches/vulkan_variant_stubs.cpp" '
               '-o "$OBJ/VulkanVariantStubs.o"')
           s = s[:at] + note + cmd + chr(10) + compile_stubs + s[at:]
 
-          # 4. linked
-          link = '  "$OBJ/FotofilmHost.o" "$OBJ/FotofilmHalideLinux.o"'
-          assert s.count(link) == 1, ('link', s.count(link))
-          s = s.replace(link, link + ' "$OBJ/FotofilmHalideAndroid.o" "$OBJ/VulkanVariantStubs.o"')
+          # 4. linked. The link line is found, not retyped: this tree spells its
+          #    names Fotufilm…, and a single wrong letter here fails the build with
+          #    an assertion that says nothing about spelling.
+          lines = s.split(chr(10))
+          at_link = next(i for i, line in enumerate(lines)
+                         if 'Host.o' in line and 'HalideLinux.o' in line
+                         and '"$OBJ"/codecs-*.o' in line)
+          assert 'HalideAndroid.o' not in lines[at_link], 'already linked'
+          lines[at_link] = lines[at_link].replace(
+              '"$OBJ"/codecs-*.o',
+              '"$OBJ/FotufilmHalideAndroid.o" "$OBJ/VulkanVariantStubs.o" "$OBJ"/codecs-*.o', 1)
+          assert 'VulkanVariantStubs.o' in lines[at_link], 'link edit did not land'
+          s = chr(10).join(lines)
           io.open(p, 'w', encoding='utf-8').write(s)
           print('patched')
           PY2
