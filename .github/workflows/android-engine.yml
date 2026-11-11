@@ -394,8 +394,19 @@ jobs:
           done
           echo "--- ffc symbols now visible ---"
           "$ndk_bin/llvm-nm" -g --defined-only out/codecs/*.o | grep -c '^[0-9a-f]* T ffc_' || true
+          # --gc-sections drops whatever nothing calls, which is every entry point of
+          # a library whose whole purpose is to be called from outside; name them so
+          # they survive, and so the dynamic table carries them.
           "$ndk_cxx" -shared -o out/libfotufilmcodecs.so \
             -Wl,--gc-sections -Wl,-soname,libfotufilmcodecs.so \
+            -Wl,--export-dynamic-symbol=ffc_decode \
+            -Wl,--export-dynamic-symbol=ffc_image_free \
+            -Wl,--export-dynamic-symbol=ffc_decode_raw \
+            -Wl,--export-dynamic-symbol=ffc_decode_tiff \
+            -Wl,--export-dynamic-symbol=ffc_thumbnail \
+            -Wl,--export-dynamic-symbol=ffc_picture_free \
+            -Wl,--export-dynamic-symbol=ffc_can_encode \
+            -Wl,--export-dynamic-symbol=ffc_encode \
             -Wl,--start-group src/build/android-engine/obj/codecs-*.o \
               src/build/android-deps/arm64/lib/*.a -Wl,--end-group \
             -lz -lm -llog -ldl
