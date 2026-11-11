@@ -371,6 +371,13 @@ jobs:
           cp -a src/flutter/build/android-engine/assets out/
           mkdir -p out/include
           cp src/Sources/CFotufilmHost/include/fotufilm.h out/include/
+          # The still-image codecs as objects, with their C header: a C++ host decodes
+          # through exactly the libraries the engine does, so the scene it hands the
+          # kernels is the engine's own, not a re-derivation of it.
+          mkdir -p out/codecs
+          cp src/build/android-engine/obj/codecs-*.o out/codecs/
+          cp src/Sources/CFotufilmCodecs/include/fotufilm_codecs.h out/include/
+          ls -l out/codecs
           # What a C++ host needs to run the same kernels without the Swift runtime:
           # the AOT kernels, their generated headers, and the shim that calls them.
           # `FotofilmHalideAndroid.cpp` is the CPU developer the app actually runs.
