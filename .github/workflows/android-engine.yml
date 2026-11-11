@@ -47,6 +47,20 @@ jobs:
           fetch-depth: 0
           path: src
 
+      # --- 1a. the bake hook -----------------------------------------------------
+      # One header and three edits, applied before anything is compiled so a typo
+      # costs seconds instead of an hour. The hook writes a develop's packed
+      # configuration, the three spectral tables, its input frame and its output
+      # to FOTUFILM_BAKE_DIR; with that variable unset it is one getenv per develop.
+      - name: bake dump hook
+        run: |
+          cp "$GITHUB_WORKSPACE/patches/FotofilmBakeDump.h" src/Sources/FotufilmHalide/
+          python3 "$GITHUB_WORKSPACE/patches/apply_bake_hook.py" \
+            src/Sources/FotufilmHalide/FotufilmHalideLinux.cpp
+          echo "--- the hook, as it landed ---"
+          grep -n "FotofilmBakeDump.h\|bake::dump_frame\|bake::dump_tiles" \
+            src/Sources/FotufilmHalide/FotufilmHalideLinux.cpp
+
       # --- 1. the toolchains the two halves need ---------------------------------
       - name: llvm 21, lld, vulkan headers, ninja
         run: |
