@@ -36,6 +36,18 @@ DUMP = r'''        // A C++ host re-deriving the pixel-spaced slots for another 
             record("renderedClumpMM", renderedClumpMM)
             record("renderedMottleMM", renderedMottleMM)
             record("mottleSizeRatio", mottleSizeRatio)
+            record("mottleShare", mottleShare)
+            // The amplitude and the aperture response are kept apart: the first does not move
+            // with the frame size, the second is read at a millimetre clump and does not either,
+            // and only the pixel spacing between them changes. Recomputing their product here
+            // would put a different rounding in the slot than the initializer's own order.
+            record("grainAmplitude", grainStrength.map { $0 / (1 - mottleShare).squareRoot() })
+            record("grainApertureResponse",
+                   renderedClumpMM.map { FilmStock.granularityApertureResponse(clumpSigmaMM: $0) })
+            record("isSilver", stock.grainDensityLaw == .silver ? 1 : 0)
+            record("grainSizeMM", stock.grainSizeMM)
+            record("grainLayerSizeRatio", stock.grainLayerSizeRatio)
+            record("grainAnchorCoverage", stock.grainAnchorCoverage)
             // Named for the frame it belongs to: a suggestion or a scan builds its own
             // invocation at its own size, and only the full frame's figures describe the
             // configuration beside it.
