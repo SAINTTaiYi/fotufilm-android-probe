@@ -28,6 +28,87 @@ env:
   SWIFT_SDK_URL: https://download.swift.org/swift-6.3.3-release/android-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_android.artifactbundle.tar.gz
 
 jobs:
+
+  # ---------------------------------------------------------------------------
+  # The spectral tables, on x86_64 Linux. `FotufilmCore` guards every Metal, Android and
+  # CryptoKit import with `#if canImport`, so the same source that builds for the phone builds
+  # here — no Halide, no NDK, no device. What comes out is the ground truth a C++ host is
+  # compared against.
+  # ---------------------------------------------------------------------------
+  tables:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    container: swift:6.3-jammy
+
+    steps:
+      - name: machine
+        run: |
+          swift --version
+          nproc; free -g | head -2; df -h / | tail -1
+
+      - name: checkout this probe
+        uses: actions/checkout@v4
+        with:
+          path: probe
+
+      - name: checkout fotufilm at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FOTUFILM_REPO }}
+          ref: ${{ env.FOTUFILM_REF }}
+          path: src
+
+      - name: apply the Swift-side patches
+        run: |
+          cd src
+          python3 ../probe/patches/apply_spectral_cli.py .
+          python3 ../probe/patches/apply_spectral_probe.py Sources/FotufilmCore/SpectralModel.swift
+          git status --short | head -20
+
+      - name: build spectral-probe
+        env:
+          FOTUFILM_DISABLE_HALIDE: "1"
+        run: |
+          cd src
+          set -o pipefail
+          swift build -c release --product spectral-probe 2>&1 | tail -40
+
+      - name: dump tables
+        env:
+          FOTUFILM_DISABLE_HALIDE: "1"
+        run: |
+          cd src
+          BIN=$(swift build -c release --product spectral-probe --show-bin-path)
+          mkdir -p /tmp/out
+          # c200 and acros100 are the controls: both already agree to 1e-6.
+          for pair in \
+            "c200 screen" \
+            "provia100f screen" \
+            "acros100 screen" \
+            "cinestill400d screen" \
+            "instaxmini screen" \
+            "c200 vision-2383" \
+            "provia100f ilfochrome-cps-1k" \
+            "c200 ektacolor-edge" \
+          ; do
+            set -- $pair
+            stock=$1; paper=$2
+            tag="${stock}__${paper}"
+            echo "== $tag"
+            FOTUFILM_BAKE_DIR=/tmp/out "$BIN/spectral-probe" "$stock" "$paper" "/tmp/out/$tag" \
+              || echo "FAILED $tag"
+          done
+          ls -la /tmp/out | head -20
+          du -sh /tmp/out
+
+      - name: upload tables
+        uses: actions/upload-artifact@v4
+        with:
+          name: spectral-tables
+          path: /tmp/out
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 350          # GitHub's hard cap is 360
