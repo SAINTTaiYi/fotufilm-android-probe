@@ -76,18 +76,23 @@ jobs:
       # --- 1. the toolchains the two halves need ---------------------------------
       - name: llvm 21, lld, vulkan headers, ninja
         run: |
+          # The runner's stock mirror (azure.archive.ubuntu.com) has been failing to resolve
+          # for hours at a time; the archive name itself answers, and a retry rides out a
+          # single blip instead of costing fifteen minutes.
+          sudo grep -rl "azure.archive.ubuntu.com" /etc/apt/ \
+            | sudo xargs -r sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' || true
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
             | sudo tee /etc/apt/trusted.gpg.d/llvm.asc > /dev/null
           echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" \
             | sudo tee /etc/apt/sources.list.d/llvm21.list
-          sudo apt-get update -qq
+          sudo apt-get update -qq -o Acquire::Retries=10
           # libvulkan-dev carries <vulkan/vulkan.h>; there is no `vulkan-headers`
           # package on jammy (that name is Fedora's) and apt-get refuses the lot.
           # liblld-21-dev is the one that is easy to miss: Halide's
           # FindHalide_LLVM looks for a WebAssembly component and only finds it
           # when LLD's CMake files are installed. Without it the configure step
           # dies with "liblld is missing", which reads like an LLVM problem.
-          sudo apt-get install -y -qq \
+          sudo apt-get install -y -qq -o Acquire::Retries=10 \
             llvm-21-dev liblld-21-dev lld-21 clang-21 libclang-21-dev \
             libzstd-dev zlib1g-dev libvulkan-dev \
             cmake ninja-build pkg-config nasm yasm autoconf automake libtool \
