@@ -159,7 +159,7 @@ jobs:
       #    symbols both define renamed out of the way;
       #  * and the GPU shim's `available` flipped to 1, which is what makes
       #    HostEngine choose HalideCPUDeveloper when FOTUFILM_GPU_DEVICE=cpu.
-      - name: android cpu kernels + a developer that needs no GPU
+      - name: android cpu kernels + the CPU developer beside Vulkan
         working-directory: src
         run: |
           set -euo pipefail
@@ -170,37 +170,49 @@ jobs:
           build/generate-android-cpu build/halide-android-arm64 --no-runtime
           ls -l build/halide-android-arm64/*.a
 
-          # Three edits, and not one backslash in them: a continuation that goes
-          # through a heredoc and a python string literal is one escaping layer
-          # too many. The commands below are one line each for that reason.
+          # One .so, two developers.
+          #
+          # FotufilmHalideLinux.cpp is not a GPU-only translation unit: it also
+          # defines the cpu entry points (fotufilm_halide_process and friends),
+          # implemented through whatever device it picked. So the two shims
+          # collide on nine names. The way out is not to drop one: rename the
+          # nine in the Linux shim, compile FotufilmHalideAndroid.cpp under their
+          # real names beside it, and let the link resolve those to the CPU
+          # implementations. The Vulkan ones stay in the file as dead code, which
+          # is 200 KB nobody pays for.
+          #
+          # With that, FOTUFILM_GPU_DEVICE=cpu gives HalideCPUDeveloper a working
+          # fotufilm_halide_process, and the app can fall back at run time.
           python3 - <<'PY2'
           import io
 
-          # 1. The GPU shim stops claiming there is no Halide at all, which is
-          #    what makes HostEngine willing to build the CPU developer.
-          p = 'Sources/FotufilmHalide/FotufilmHalideLinux.cpp'
-          s = io.open(p, encoding='utf-8').read()
-          old = 'extern "C" int32_t fotufilm_halide_available(void) { return 0; }'
-          new = 'extern "C" int32_t fotufilm_halide_available(void) { return 1; }'
-          assert s.count(old) == 1, ('available', s.count(old))
-          io.open(p, 'w', encoding='utf-8').write(s.replace(old, new))
+          names = ['fotufilm_halide_available', 'fotufilm_halide_set_film_tiles',
+                   'fotufilm_halide_develop', 'fotufilm_halide_print',
+                   'fotufilm_halide_process', 'fotufilm_halide_process_strip',
+                   'fotufilm_halide_process_tile', 'fotufilm_halide_process_tile_with_exposure',
+                   'fotufilm_halide_process_region']
+          renames = ' '.join('-D' + n + '=' + n + '_gpu' for n in names)
 
-          # 2. The build compiles the CPU shim too. The two symbols it shares
-          #    with the Linux shim are renamed so both can live in one .so.
           p = 'tools/build-android-engine.sh'
           s = io.open(p, encoding='utf-8').read()
+
+          # 1. the Linux shim is compiled with those nine renamed
           anchor = '  Sources/FotufilmHalide/FotufilmHalideLinux.cpp -o "$OBJ/FotufilmHalideLinux.o"'
           assert s.count(anchor) == 1, ('anchor', s.count(anchor))
+          s = s.replace(anchor,
+                        '  -DFOTUFILM_HALIDE_ANDROID_AOT=1 ' + renames + ' ' +
+                        anchor.lstrip() + chr(10))
+
+          # 2. and the CPU shim is compiled under their real names, beside it
           cmd = ('"$CXX" -std=c++17 "${CFLAGS_COMMON[@]}" -c -DFOTUFILM_HALIDE_ANDROID_AOT=1 '
-                 '-Dfotufilm_halide_available=fotufilm_halide_available_cpu '
-                 '-Dfotufilm_halide_set_film_tiles=fotufilm_halide_set_film_tiles_cpu '
                  '-I"$KERNELS" -ISources/FotufilmHalide/include -ISources/FotufilmHalide '
                  'Sources/FotufilmHalide/FotufilmHalideAndroid.cpp -o "$OBJ/FotufilmHalideAndroid.o"')
-          note = ('# The CPU developer: the same Halide runtime, kernels compiled for ARM64'
-                  + chr(10) + '# with no device at all.' + chr(10))
-          s = s.replace(anchor, anchor + chr(10) + note + cmd)
+          tail = 'Sources/FotufilmHalide/FotufilmHalideLinux.cpp -o "$OBJ/FotufilmHalideLinux.o"'
+          at = s.index(tail) + len(tail)
+          note = (chr(10) + '# The CPU developer, under the real names the Linux shim gave up.' + chr(10))
+          s = s[:at] + note + cmd + s[at:]
 
-          # 3. And links it.
+          # 3. linked
           link = '  "$OBJ/FotufilmHost.o" "$OBJ/FotufilmHalideLinux.o"'
           assert s.count(link) == 1, ('link', s.count(link))
           s = s.replace(link, link + ' "$OBJ/FotufilmHalideAndroid.o"')
