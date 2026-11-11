@@ -139,7 +139,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: src/build/halide-android-arm64
-          key: halide-android-${{ env.HALIDE_PIN }}-v1
+          # v2: v1 is full of the 2864 per-variant Vulkan kernels that the next
+          # step no longer builds, and a hit restores them into the link.
+          key: halide-android-${{ env.HALIDE_PIN }}-v2-cpuonly
 
       - name: android aot kernels (arm64, no per-variant Vulkan)
         working-directory: src
@@ -163,6 +165,12 @@ jobs:
           # trichromatic) the CPU developer links against.
           HALIDE="${HALIDE_ROOT:?set HALIDE_ROOT}"
           OUT=build/halide-android-arm64
+          # **The cache step above restores the previous kernels**, and the
+          # previous set is the 2864 Vulkan variants this step no longer builds.
+          # The first attempt at this change shrank the artifact by 245 bytes
+          # for exactly that reason: `"$KERNELS"/*.a` globbed them back in. The
+          # key is bumped too, but a cleared directory is what actually holds.
+          rm -rf "$OUT"
           mkdir -p "$OUT"
           "${CXX:-clang++}" -std=c++17 -O2 -I"$HALIDE/include" -ISources/FotufilmHalide/include \
             tools/generate_halide_ios.cpp -L"$HALIDE/lib" -lHalide \
