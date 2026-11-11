@@ -38,6 +38,13 @@ jobs:
           nproc; free -g | head -2; df -h / | tail -1
           echo "NDK=$ANDROID_NDK_LATEST_HOME"; ls "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt"
 
+      # Our own tree, for patches/. The step below checks out *another* repository into
+      # `src`, so without this one the workspace holds nothing of ours.
+      - name: checkout this probe
+        uses: actions/checkout@v4
+        with:
+          path: probe
+
       - name: checkout fotufilm at the pinned commit + Halide submodule
         uses: actions/checkout@v4
         with:
@@ -48,17 +55,20 @@ jobs:
           path: src
 
       # --- 1a. the bake hook -----------------------------------------------------
-      # One header and three edits, applied before anything is compiled so a typo
-      # costs seconds instead of an hour. The hook writes a develop's packed
-      # configuration, the three spectral tables, its input frame and its output
-      # to FOTUFILM_BAKE_DIR; with that variable unset it is one getenv per develop.
+      # One header and four edits across the two shims, applied before anything is
+      # compiled so a typo costs seconds instead of an hour. The hook writes a
+      # frame's packed configuration, the three spectral tables, its input and its
+      # output to FOTUFILM_BAKE_DIR; with that variable unset it costs one getenv
+      # per develop. FotufilmHalideAndroid.cpp is the developer that actually runs
+      # (the job below builds it beside the Linux shim); the Linux one is hooked
+      # too so a driver that accepts Halide's compute pipelines dumps the same.
       - name: bake dump hook
         run: |
-          cp "$GITHUB_WORKSPACE/patches/FotofilmBakeDump.h" src/Sources/FotufilmHalide/
-          python3 "$GITHUB_WORKSPACE/patches/apply_bake_hook.py" \
-            src/Sources/FotufilmHalide/FotufilmHalideLinux.cpp
+          cp "$GITHUB_WORKSPACE/probe/patches/FotufilmBakeDump.h" src/Sources/FotufilmHalide/
+          python3 "$GITHUB_WORKSPACE/probe/patches/apply_bake_hook.py" src
           echo "--- the hook, as it landed ---"
-          grep -n "FotofilmBakeDump.h\|bake::dump_frame\|bake::dump_tiles" \
+          grep -n "FotufilmBakeDump.h\|bake::dump_planar\|bake::dump_frame\|bake::dump_tiles" \
+            src/Sources/FotufilmHalide/FotufilmHalideAndroid.cpp \
             src/Sources/FotufilmHalide/FotufilmHalideLinux.cpp
 
       # --- 1. the toolchains the two halves need ---------------------------------
