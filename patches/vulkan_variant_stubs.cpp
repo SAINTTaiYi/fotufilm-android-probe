@@ -21,14 +21,17 @@
 
 #include "FotufilmAotFrame.h"
 
-#define FOTUFILM_AOT_STUB(variant_name, variant_mask)                                  \
-    extern "C" int fotufilm_aot_vulkan_##variant_name(FOTUFILM_AOT_FRAME_SIGNATURE) { \
-        (void)variant_mask;                                                            \
+// Short names on purpose: the engine spells its files Fotufilm… and its macros
+// FOTUFILM…, and a single wrong letter in a fifty-character identifier is a
+// compile error that reads like a missing declaration.
+#define STUB(name, mask)                                                              \
+    extern "C" int fotufilm_aot_vulkan_##name(FOTUFILM_AOT_FRAME_SIGNATURE) {         \
+        (void)(mask);                                                                  \
         return -3;                                                                     \
     }
 
-FOTOFILM_AOT_VARIANTS(FOTOFILM_AOT_STUB)
+FOTUFILM_AOT_VARIANTS(STUB)
 
-#undef FOTOFILM_AOT_STUB
+#undef STUB
 
 #endif  // FOTUFILM_VULKAN_STUBS
