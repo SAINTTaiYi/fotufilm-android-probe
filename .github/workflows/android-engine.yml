@@ -180,6 +180,30 @@ jobs:
              "$HALIDE/include/HalideRuntimeVulkan.h" "$OUT/"
           ls -l "$OUT"/*.a
 
+          # **The line below is what defeated the previous attempt.**
+          #
+          # tools/build-android-engine.sh does:
+          #     if [[ -n "${HALIDE_ROOT:-}" || ! -f "$KERNELS/fotufilm_aot_runtime.a" ]]; then
+          #       tools/generate-halide-aot-android.sh "$KERNELS"
+          # and HALIDE_ROOT is always set in CI, so that branch always fires and
+          # rebuilds all 2864 per-variant Vulkan kernels right after this step
+          # deliberately skipped them. The link then globs "$KERNELS"/*.a and
+          # picks every one of them back up: the .so came out byte-for-byte the
+          # same size (154,434,088) across the change, which is how it was found.
+          #
+          # The kernels are generated above, so the fallback is only needed when
+          # they are genuinely absent.
+          python3 - <<'PY3'
+          import io
+          p = 'tools/build-android-engine.sh'
+          s = io.open(p, encoding='utf-8').read()
+          old = 'if [[ -n "${HALIDE_ROOT:-}" || ! -f "$KERNELS/fotufilm_aot_runtime.a" ]]; then'
+          assert s.count(old) == 1, ('kernels-guard', s.count(old))
+          s = s.replace(old, 'if [[ ! -f "$KERNELS/fotufilm_aot_runtime.a" ]]; then')
+          io.open(p, 'w', encoding='utf-8').write(s)
+          print('build-android-engine.sh: the kernel fallback no longer fires when HALIDE_ROOT is set')
+          PY3
+
       # The Vulkan half is the only developer the upstream Android build links,
       # and `FotufilmHalideLinux.cpp` hardcodes `fotufilm_halide_available()` to
       # 0 because of it. If a driver refuses Halide's compute pipelines there is
