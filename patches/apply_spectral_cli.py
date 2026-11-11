@@ -103,7 +103,8 @@ def publicize(path):
 
 
 def write_main(repo):
-    directory = os.path.join(repo, "Sources", "SpectralProbe")
+    # SwiftPM derives the source directory from the target name, hyphen and all.
+    directory = os.path.join(repo, "Sources", "spectral-probe")
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, "main.swift")
     io.open(path, "w", encoding="utf-8").write(MAIN)
