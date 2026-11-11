@@ -397,8 +397,14 @@ jobs:
           # --gc-sections drops whatever nothing calls, which is every entry point of
           # a library whose whole purpose is to be called from outside; name them so
           # they survive, and so the dynamic table carries them.
+          # No --gc-sections here: it drops every entry point of a library nothing
+          # inside the link calls, which is all of them. The objects are already the
+          # engine's own; keeping the lot costs size and buys a usable host library.
           "$ndk_cxx" -shared -o out/libfotufilmcodecs.so \
-            -Wl,--gc-sections -Wl,-soname,libfotufilmcodecs.so \
+            -Wl,-soname,libfotufilmcodecs.so \
+            -Wl,-u,ffc_decode -Wl,-u,ffc_encode -Wl,-u,ffc_image_free \
+            -Wl,-u,ffc_decode_raw -Wl,-u,ffc_decode_tiff -Wl,-u,ffc_thumbnail \
+            -Wl,-u,ffc_picture_free -Wl,-u,ffc_can_encode \
             -Wl,--export-dynamic-symbol=ffc_decode \
             -Wl,--export-dynamic-symbol=ffc_image_free \
             -Wl,--export-dynamic-symbol=ffc_decode_raw \
