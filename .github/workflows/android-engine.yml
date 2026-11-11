@@ -384,38 +384,25 @@ jobs:
           # of our own that lands 3e-5 away from it.
           ndk_cxx="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++"
           ndk_bin="$(dirname "$ndk_cxx")"
-          # The codecs are compiled with -fvisibility=hidden because the engine wants
-          # nothing exported; a host needs its entry points. Lift only those.
-          for o in out/codecs/*.o; do
-            syms=$("$ndk_bin/llvm-nm" -g --defined-only "$o" | awk '{print $3}' | grep '^ffc_' || true)
-            args=()
-            for s in $syms; do args+=(--set-symbol-visibility="$s=default"); done
-            if [ ${#args[@]} -gt 0 ]; then "$ndk_bin/llvm-objcopy" "${args[@]}" "$o"; fi
+          # The engine compiles the codecs with -fvisibility=hidden and links them into
+          # a library that exports sixteen symbols. A host needs the codecs' own entry
+          # points, and nothing short of compiling them visible makes the linker keep
+          # them in the dynamic table -- -u, --export-dynamic-symbol and objcopy all
+          # left them LOCAL HIDDEN. Thirteen translation units, once per build.
+          mkdir -p out/codecs-visible
+          for f in src/Sources/CFotufilmCodecs/*.cpp; do
+            "$ndk_cxx" -std=c++17 -O2 -fPIC -fvisibility=default -fvisibility-inlines-hidden \
+              -ffunction-sections -fdata-sections \
+              -Isrc/Sources/CFotufilmCodecs/include -Isrc/build/android-deps/arm64/include \
+              -c "$f" -o "out/codecs-visible/$(basename "$f" .cpp).o"
           done
-          echo "--- ffc symbols now visible ---"
-          "$ndk_bin/llvm-nm" -g --defined-only out/codecs/*.o | grep -c '^[0-9a-f]* T ffc_' || true
-          # --gc-sections drops whatever nothing calls, which is every entry point of
-          # a library whose whole purpose is to be called from outside; name them so
-          # they survive, and so the dynamic table carries them.
-          # No --gc-sections here: it drops every entry point of a library nothing
-          # inside the link calls, which is all of them. The objects are already the
-          # engine's own; keeping the lot costs size and buys a usable host library.
           "$ndk_cxx" -shared -o out/libfotufilmcodecs.so \
             -Wl,-soname,libfotufilmcodecs.so \
-            -Wl,-u,ffc_decode -Wl,-u,ffc_encode -Wl,-u,ffc_image_free \
-            -Wl,-u,ffc_decode_raw -Wl,-u,ffc_decode_tiff -Wl,-u,ffc_thumbnail \
-            -Wl,-u,ffc_picture_free -Wl,-u,ffc_can_encode \
-            -Wl,--export-dynamic-symbol=ffc_decode \
-            -Wl,--export-dynamic-symbol=ffc_image_free \
-            -Wl,--export-dynamic-symbol=ffc_decode_raw \
-            -Wl,--export-dynamic-symbol=ffc_decode_tiff \
-            -Wl,--export-dynamic-symbol=ffc_thumbnail \
-            -Wl,--export-dynamic-symbol=ffc_picture_free \
-            -Wl,--export-dynamic-symbol=ffc_can_encode \
-            -Wl,--export-dynamic-symbol=ffc_encode \
-            -Wl,--start-group src/build/android-engine/obj/codecs-*.o \
+            -Wl,--start-group out/codecs-visible/*.o \
               src/build/android-deps/arm64/lib/*.a -Wl,--end-group \
             -lz -lm -llog -ldl
+          echo "--- exported ffc symbols ---"
+          readelf --dyn-syms -W out/libfotufilmcodecs.so | grep -c 'ffc_' || true
           ls -l out/libfotufilmcodecs.so
           # What a C++ host needs to run the same kernels without the Swift runtime:
           # the AOT kernels, their generated headers, and the shim that calls them.
