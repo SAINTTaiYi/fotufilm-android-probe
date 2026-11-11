@@ -291,12 +291,22 @@ jobs:
           tail = 'Sources/FotufilmHalide/FotufilmHalideLinux.cpp -o "$OBJ/FotufilmHalideLinux.o"'
           at = s.index(tail) + len(tail)
           note = (chr(10) + '# The CPU developer, under the real names the Linux shim gave up.' + chr(10))
-          s = s[:at] + note + cmd + s[at:]
 
-          # 3. linked
-          link = '  "$OBJ/FotufilmHost.o" "$OBJ/FotufilmHalideLinux.o"'
+          # 3. the Vulkan variants this build does not generate, as stubs: their
+          #    addresses sit in a static table, and Android's linker resolves those
+          #    relocations when the library opens. Without them the .so links and
+          #    then refuses to load ("cannot locate symbol fotufilm_aot_vulkan_color").
+          compile_stubs = (
+              '"$CXX" -std=c++17 "${CFLAGS_COMMON[@]}" -c -DFOTUFILM_VULKAN_STUBS=1 '
+              '-I"$KERNELS" -ISources/FotofilmHalide/include -ISources/FotufilmHalide '
+              '"$GITHUB_WORKSPACE/probe/patches/vulkan_variant_stubs.cpp" '
+              '-o "$OBJ/VulkanVariantStubs.o"')
+          s = s[:at] + note + cmd + chr(10) + compile_stubs + s[at:]
+
+          # 4. linked
+          link = '  "$OBJ/FotofilmHost.o" "$OBJ/FotofilmHalideLinux.o"'
           assert s.count(link) == 1, ('link', s.count(link))
-          s = s.replace(link, link + ' "$OBJ/FotufilmHalideAndroid.o"')
+          s = s.replace(link, link + ' "$OBJ/FotofilmHalideAndroid.o" "$OBJ/VulkanVariantStubs.o"')
           io.open(p, 'w', encoding='utf-8').write(s)
           print('patched')
           PY2
@@ -357,8 +367,15 @@ jobs:
           # `FotofilmHalideAndroid.cpp` is the CPU developer the app actually runs.
           mkdir -p out/kernels
           cp src/build/halide-android-arm64/*.a src/build/halide-android-arm64/*.h out/kernels/
-          cp -a src/Sources/FotofilmHalide out/engine
+          cp -a src/Sources/FotufilmHalide out/engine
           du -sh out/kernels out/engine
+          # Nothing the kernels must supply may be left undefined: a shared object
+          # links anyway, and the phone then refuses to open it.
+          echo "--- undefined aot symbols (must be none) ---"
+          if readelf -sW out/jniLibs/arm64-v8a/libfotufilm.so | awk '$7 == "UND" { print $8 }' | grep fotufilm_aot_; then
+            echo "error: the library would not load"; exit 1
+          fi
+          echo none
           # What the shim was built against, so the shell can be matched to it.
           { echo "fotufilm ref: $FOTUFILM_REF"
             echo "halide pin:   $HALIDE_PIN"
