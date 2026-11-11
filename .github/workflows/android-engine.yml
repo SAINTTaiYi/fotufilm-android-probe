@@ -168,38 +168,42 @@ jobs:
             -L"$HALIDE_ROOT/lib" -lHalide -Wl,-rpath,"$HALIDE_ROOT/lib" \
             -o build/generate-android-cpu
           build/generate-android-cpu build/halide-android-arm64 --no-runtime
-          ls -l build/halide-android-arm64/*.a | head
+          ls -l build/halide-android-arm64/*.a
 
+          # Three edits, and not one backslash in them: a continuation that goes
+          # through a heredoc and a python string literal is one escaping layer
+          # too many. The commands below are one line each for that reason.
           python3 - <<'PY2'
           import io
-          # 1. the GPU shim stops claiming there is no Halide at all
+
+          # 1. The GPU shim stops claiming there is no Halide at all, which is
+          #    what makes HostEngine willing to build the CPU developer.
           p = 'Sources/FotufilmHalide/FotufilmHalideLinux.cpp'
           s = io.open(p, encoding='utf-8').read()
           old = 'extern "C" int32_t fotufilm_halide_available(void) { return 0; }'
           new = 'extern "C" int32_t fotufilm_halide_available(void) { return 1; }'
-          assert s.count(old) == 1, s.count(old)
+          assert s.count(old) == 1, ('available', s.count(old))
           io.open(p, 'w', encoding='utf-8').write(s.replace(old, new))
 
-          # 2. the build compiles the CPU shim too, and links it
+          # 2. The build compiles the CPU shim too. The two symbols it shares
+          #    with the Linux shim are renamed so both can live in one .so.
           p = 'tools/build-android-engine.sh'
           s = io.open(p, encoding='utf-8').read()
-          anchor = '  Sources/FotufilmHalide/FotufilmHalideLinux.cpp -o "$OBJ/FotufilmHalideLinux.o"\n'
-          assert s.count(anchor) == 1, s.count(anchor)
-          extra = anchor + (
-              '# The CPU developer: same Halide runtime, kernels compiled for ARM64\n'
-              '# without a device. The two symbols it shares with the Linux shim are\n'
-              '# renamed so both can live in one .so.\n'
-              '"$CXX" -std=c++17 "${CFLAGS_COMMON[@]}" -c -DFOTUFILM_HALIDE_ANDROID_AOT=1 \n'
-              '  -Dfotufilm_halide_available=fotufilm_halide_available_cpu \n'
-              '  -Dfotufilm_halide_set_film_tiles=fotufilm_halide_set_film_tiles_cpu \n'
-              '  -I"$KERNELS" -ISources/FotufilmHalide/include -ISources/FotufilmHalide \n'
-              '  Sources/FotufilmHalide/FotufilmHalideAndroid.cpp -o "$OBJ/FotufilmHalideAndroid.o"\n')
-          s = s.replace(anchor, extra)
-          link = '  "$OBJ/FotufilmHost.o" "$OBJ/FotufilmHalideLinux.o" "$OBJ"/codecs-*.o "$OBJ"/video-*.o \n'
-          assert s.count(link) == 1, s.count(link)
-          s = s.replace(link,
-              '  "$OBJ/FotufilmHost.o" "$OBJ/FotufilmHalideLinux.o" "$OBJ/FotufilmHalideAndroid.o" \n'
-              '  "$OBJ"/codecs-*.o "$OBJ"/video-*.o \n')
+          anchor = '  Sources/FotufilmHalide/FotufilmHalideLinux.cpp -o "$OBJ/FotufilmHalideLinux.o"'
+          assert s.count(anchor) == 1, ('anchor', s.count(anchor))
+          cmd = ('"$CXX" -std=c++17 "${CFLAGS_COMMON[@]}" -c -DFOTUFILM_HALIDE_ANDROID_AOT=1 '
+                 '-Dfotufilm_halide_available=fotufilm_halide_available_cpu '
+                 '-Dfotufilm_halide_set_film_tiles=fotufilm_halide_set_film_tiles_cpu '
+                 '-I"$KERNELS" -ISources/FotufilmHalide/include -ISources/FotufilmHalide '
+                 'Sources/FotufilmHalide/FotufilmHalideAndroid.cpp -o "$OBJ/FotufilmHalideAndroid.o"')
+          note = ('# The CPU developer: the same Halide runtime, kernels compiled for ARM64'
+                  + chr(10) + '# with no device at all.' + chr(10))
+          s = s.replace(anchor, anchor + chr(10) + note + cmd)
+
+          # 3. And links it.
+          link = '  "$OBJ/FotufilmHost.o" "$OBJ/FotufilmHalideLinux.o"'
+          assert s.count(link) == 1, ('link', s.count(link))
+          s = s.replace(link, link + ' "$OBJ/FotufilmHalideAndroid.o"')
           io.open(p, 'w', encoding='utf-8').write(s)
           print('patched')
           PY2
