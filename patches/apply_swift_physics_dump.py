@@ -11,7 +11,7 @@ import io
 import sys
 
 ANCHOR = "        let mottleRadius = Self.gaussianRadius(mottleSigma)\n"
-DUMP = '''        // A C++ host re-deriving the pixel-spaced slots for another frame size needs the
+DUMP = r'''        // A C++ host re-deriving the pixel-spaced slots for another frame size needs the
         // millimetre figures this initializer folded them from. They are not in the packed
         // configuration, and rounding them back out of it loses exactly what it needs.
         if let directory = ProcessInfo.processInfo.environment["FOTUFILM_BAKE_DIR"] {
