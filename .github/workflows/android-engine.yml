@@ -378,6 +378,17 @@ jobs:
           cp src/build/android-engine/obj/codecs-*.o out/codecs/
           cp src/Sources/CFotufilmCodecs/include/fotufilm_codecs.h out/include/
           ls -l out/codecs
+          # And as one shared object, so a host links one file rather than seven
+          # third-party archives in the right order. Same objects the engine uses,
+          # so a decode is the engine's decode -- lcms2 through D50, not a matrix
+          # of our own that lands 3e-5 away from it.
+          ndk_cxx="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++"
+          "$ndk_cxx" -shared -o out/libfotufilmcodecs.so \
+            -Wl,--gc-sections -Wl,-soname,libfotufilmcodecs.so \
+            -Wl,--start-group src/build/android-engine/obj/codecs-*.o \
+              src/build/android-deps/arm64/lib/*.a -Wl,--end-group \
+            -lz -lm -llog -ldl
+          ls -l out/libfotufilmcodecs.so
           # What a C++ host needs to run the same kernels without the Swift runtime:
           # the AOT kernels, their generated headers, and the shim that calls them.
           # `FotofilmHalideAndroid.cpp` is the CPU developer the app actually runs.
