@@ -352,6 +352,13 @@ jobs:
           cp -a src/flutter/build/android-engine/assets out/
           mkdir -p out/include
           cp src/Sources/CFotufilmHost/include/fotufilm.h out/include/
+          # What a C++ host needs to run the same kernels without the Swift runtime:
+          # the AOT kernels, their generated headers, and the shim that calls them.
+          # `FotofilmHalideAndroid.cpp` is the CPU developer the app actually runs.
+          mkdir -p out/kernels
+          cp src/build/halide-android-arm64/*.a src/build/halide-android-arm64/*.h out/kernels/
+          cp -a src/Sources/FotofilmHalide out/engine
+          du -sh out/kernels out/engine
           # What the shim was built against, so the shell can be matched to it.
           { echo "fotufilm ref: $FOTUFILM_REF"
             echo "halide pin:   $HALIDE_PIN"
