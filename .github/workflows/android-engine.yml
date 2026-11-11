@@ -141,11 +141,36 @@ jobs:
           path: src/build/halide-android-arm64
           key: halide-android-${{ env.HALIDE_PIN }}-v1
 
-      - name: android aot kernels (arm64 + vulkan)
+      - name: android aot kernels (arm64, no per-variant Vulkan)
         working-directory: src
         run: |
-          tools/generate-halide-aot-android.sh
-          ls -l build/halide-android-arm64/*.a | head
+          set -euo pipefail
+          # **The 2864 Vulkan variants are not built, and nothing references them.**
+          #
+          # `generate-halide-aot-android.sh` asks the generator for a count and
+          # then emits one variant per stock per stage, each statically carrying
+          # its own SPIR-V. Measured on the 154 MB library: .rodata is 123.3 MB
+          # and holds exactly 2864 embedded SPIR-V modules, 59% of it zero
+          # padding. `.text` is only 22 MB. But `fotufilm_halide_android_gpu_*`
+          # is referenced by nothing: the Vulkan shim reaches Halide through its
+          # own device interface, and the developer that actually runs is the CPU
+          # one (FOTUFILM_GPU_DEVICE=cpu, because the driver refuses Halide's
+          # compute pipelines). The CPU kernels are general -- one per stage, not
+          # one per stock -- so skipping the variants costs no picture.
+          #
+          # The `--extras` call stays: it is what produces the shared Halide
+          # runtime and the cpu extras (negative, scan_prepare, transport,
+          # trichromatic) the CPU developer links against.
+          HALIDE="${HALIDE_ROOT:?set HALIDE_ROOT}"
+          OUT=build/halide-android-arm64
+          mkdir -p "$OUT"
+          "${CXX:-clang++}" -std=c++17 -O2 -I"$HALIDE/include" -ISources/FotufilmHalide/include \
+            tools/generate_halide_ios.cpp -L"$HALIDE/lib" -lHalide \
+            -Wl,-rpath,"$HALIDE/lib" -lpthread -o "$OUT/generate-halide-aot"
+          "$OUT/generate-halide-aot" "$OUT" --android-vulkan --prefix=fotufilm_aot_ --extras
+          cp "$HALIDE/include/HalideBuffer.h" "$HALIDE/include/HalideRuntime.h" \
+             "$HALIDE/include/HalideRuntimeVulkan.h" "$OUT/"
+          ls -l "$OUT"/*.a
 
       # The Vulkan half is the only developer the upstream Android build links,
       # and `FotufilmHalideLinux.cpp` hardcodes `fotufilm_halide_available()` to
