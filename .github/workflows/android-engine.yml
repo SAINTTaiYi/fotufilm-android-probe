@@ -65,6 +65,8 @@ jobs:
       - name: bake dump hook
         run: |
           cp "$GITHUB_WORKSPACE/probe/patches/FotufilmBakeDump.h" src/Sources/FotufilmHalide/
+          python3 "$GITHUB_WORKSPACE/probe/patches/apply_swift_physics_dump.py" \
+            src/Sources/FotufilmCore/FilmEngine.swift
           python3 "$GITHUB_WORKSPACE/probe/patches/apply_bake_hook.py" src
           echo "--- the hook, as it landed ---"
           grep -n "FotufilmBakeDump.h\|bake::dump_planar\|bake::dump_frame\|bake::dump_tiles" \
