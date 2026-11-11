@@ -14,7 +14,8 @@ ANCHOR = "        let mottleRadius = Self.gaussianRadius(mottleSigma)\n"
 DUMP = r'''        // A C++ host re-deriving the pixel-spaced slots for another frame size needs the
         // millimetre figures this initializer folded them from. They are not in the packed
         // configuration, and rounding them back out of it loses exactly what it needs.
-        if let directory = ProcessInfo.processInfo.environment["FOTUFILM_BAKE_DIR"] {
+        if options.stage == .full,
+           let directory = ProcessInfo.processInfo.environment["FOTUFILM_BAKE_DIR"] {
             var physics = ""
             func record(_ name: String, _ value: Float) { physics += "\(name)=\(value)\n" }
             func record(_ name: String, _ values: [Float]) {
@@ -35,7 +36,11 @@ DUMP = r'''        // A C++ host re-deriving the pixel-spaced slots for another 
             record("renderedClumpMM", renderedClumpMM)
             record("renderedMottleMM", renderedMottleMM)
             record("mottleSizeRatio", mottleSizeRatio)
-            let path = (directory as NSString).appendingPathComponent("physio.txt")
+            // Named for the frame it belongs to: a suggestion or a scan builds its own
+            // invocation at its own size, and only the full frame's figures describe the
+            // configuration beside it.
+            let path = (directory as NSString)
+                .appendingPathComponent("physio-\(width)x\(height).txt")
             try? physics.write(toFile: path, atomically: true, encoding: .utf8)
         }
 
