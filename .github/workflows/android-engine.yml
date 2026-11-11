@@ -37,6 +37,9 @@ jobs:
   # ---------------------------------------------------------------------------
   tables:
     runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 40
     container: swift:6.3-jammy
 
