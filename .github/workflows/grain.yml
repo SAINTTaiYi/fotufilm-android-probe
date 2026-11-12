@@ -28,6 +28,10 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     container: swift:6.3-jammy
+    # A container's default shell is `sh`, which has no `pipefail`.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: machine
