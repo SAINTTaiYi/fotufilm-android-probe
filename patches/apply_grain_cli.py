@@ -16,48 +16,62 @@ ENTRY = r'''
 MAIN = r'''import Foundation
 import FotufilmCore
 
-// Lays one stock's film tiles with the Swift reference and writes the packed bank, so the
-// C++ host that replaces this path can be compared texel for texel on any Swift toolchain.
+// Lays a stock's film tiles with the Swift reference and writes the packed bank, so the C++
+// host that replaces this path can be compared texel for texel on any Swift toolchain.
 //
-//   grain-probe <stock> <out-dir> [records]
+//   grain-probe <stock|all> <out-dir> [records]
+//
+// `records` stops after the population: 10 KB a stock, against 13.5 MB of tiles, and most
+// stocks only need the first written down.
 
 let args = CommandLine.arguments
 guard args.count >= 3 else {
-    FileHandle.standardError.write(Data("usage: grain-probe <stock> <out-dir>\n".utf8))
+    FileHandle.standardError.write(Data("usage: grain-probe <stock|all> <out-dir> [records]\n".utf8))
     exit(2)
 }
-let stockID = args[1]
 let outDir = args[2]
-guard let stock = FilmStock.named(stockID) else {
-    FileHandle.standardError.write(Data("no stock \(stockID)\n".utf8))
+let recordsOnly = args.count >= 4 && args[3] == "records"
+
+// The pack resolves through `FilmStockPack.searchPaths`, which reaches the SwiftPM bundle's
+// copy of `Stocks`, so no directory has to be passed in.
+let stockIDs: [String]
+if args[1] == "all" {
+    stockIDs = FilmStock.allPresetIDs
+} else {
+    stockIDs = [args[1]]
+}
+guard !stockIDs.isEmpty else {
+    FileHandle.standardError.write(Data("no stocks\n".utf8))
     exit(1)
 }
 try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 
-let started = Date()
-let population = FilmGrain(stock: stock)
-FileHandle.standardError.write(Data("population \(stockID) in \(-started.timeIntervalSinceNow)s\n".utf8))
-
-// `records` stops here: the population is 10 KB, the tiles 13.5 MB, and most stocks only
-// need the first written down.
-if args.count >= 4, args[3] == "records" {
-    print("records only \(stockID)")
-    exit(0)
+for id in stockIDs {
+    guard let stock = FilmStock.named(id) else {
+        FileHandle.standardError.write(Data("no stock \(id)\n".utf8))
+        continue
+    }
+    // The population's dump is keyed by this, so it lands beside the tiles.
+    setenv("FOTOFILM_BAKE_TAG", id, 1)
+    let started = Date()
+    let population = FilmGrain(stock: stock)
+    let populationSeconds = -started.timeIntervalSinceNow
+    if recordsOnly {
+        print("records \(id) in \(populationSeconds)s")
+        continue
+    }
+    let marks = Date()
+    let packed = population.tiles().packed()
+    let tilesSeconds = -marks.timeIntervalSinceNow
+    let url = URL(fileURLWithPath: outDir).appendingPathComponent("tiles-\(id).f32")
+    do {
+        try packed.withUnsafeBytes { Data($0) }.write(to: url)
+    } catch {
+        FileHandle.standardError.write(Data("could not write \(url.path): \(error)\n".utf8))
+        exit(1)
+    }
+    print("tiles \(id) \(packed.count) floats population \(populationSeconds)s tiles \(tilesSeconds)s")
 }
-
-let marks = Date()
-let tiles = population.tiles()
-let packed = tiles.packed()
-FileHandle.standardError.write(Data("tiles \(packed.count) floats in \(-marks.timeIntervalSinceNow)s\n".utf8))
-
-let url = URL(fileURLWithPath: outDir).appendingPathComponent("tiles-\(stockID).f32")
-do {
-    try packed.withUnsafeBytes { Data($0) }.write(to: url)
-} catch {
-    FileHandle.standardError.write(Data("could not write \(url.path): \(error)\n".utf8))
-    exit(1)
-}
-print("wrote \(url.path) \(packed.count)")
 '''
 
 
