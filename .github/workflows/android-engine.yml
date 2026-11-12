@@ -154,6 +154,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/probe/patches/apply_spectral_probe.py" \
             src/Sources/FotufilmCore/SpectralModel.swift
           python3 "$GITHUB_WORKSPACE/probe/patches/apply_bake_hook.py" src
+          python3 "$GITHUB_WORKSPACE/probe/patches/apply_lean_codecs.py" src
           echo "--- the hook, as it landed ---"
           grep -n "FotufilmBakeDump.h\|bake::dump_planar\|bake::dump_frame\|bake::dump_tiles" \
             src/Sources/FotufilmHalide/FotufilmHalideAndroid.cpp \
@@ -484,6 +485,8 @@ jobs:
           # left them LOCAL HIDDEN. Thirteen translation units, once per build.
           mkdir -p out/codecs-visible
           for f in src/Sources/CFotufilmCodecs/*.cpp; do
+            # The lean build carries neither decoder; DecodeStubs.cpp stands in for both.
+            case "$(basename "$f")" in DecodeHEIF.cpp|DecodeEXR.cpp) continue;; esac
             "$ndk_cxx" -std=c++17 -O2 -fPIC -fvisibility=default -fvisibility-inlines-hidden \
               -ffunction-sections -fdata-sections \
               -Isrc/Sources/CFotufilmCodecs/include -Isrc/build/android-deps/arm64/include \
@@ -492,7 +495,8 @@ jobs:
           "$ndk_cxx" -shared -o out/libfotufilmcodecs.so \
             -Wl,-soname,libfotufilmcodecs.so \
             -Wl,--start-group out/codecs-visible/*.o \
-              src/build/android-deps/arm64/lib/*.a -Wl,--end-group \
+              $(ls src/build/android-deps/arm64/lib/*.a \
+                | grep -vE 'heif|de265|OpenEXR|Iex|IlmThread|Imath') -Wl,--end-group \
             -lz -lm -llog -ldl
           echo "--- exported ffc symbols ---"
           readelf --dyn-syms -W out/libfotufilmcodecs.so | grep -c 'ffc_' || true
