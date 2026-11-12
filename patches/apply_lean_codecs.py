@@ -21,6 +21,8 @@ STUBS = r'''// The HEIF and OpenEXR decoders are not part of a build configured 
 
 #include "Codecs.hpp"
 
+namespace ffc {
+
 namespace {
 
 [[noreturn]] void unsupported(const char *what, const std::string &path) {
@@ -40,6 +42,8 @@ Raster decodeHEIF(const std::string &path, ffc_capture &) {
 Raster decodeHEIFReduced(const std::string &path, uint32_t) {
     unsupported("HEIF", path);
 }
+
+}  // namespace ffc
 '''
 
 
