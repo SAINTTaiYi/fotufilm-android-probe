@@ -1,0 +1,108 @@
+name: grain
+
+# Lays one stock's film tiles with the Swift reference on an x86_64 runner.
+#
+# The Android engine has no Halide compiler, so `fotufilm_film_tile_build` is stubbed out and
+# every tile comes from `FilmGrain.swift`'s own render. Replacing that path with C++ needs two
+# things: the crystal population each stock was laid from (10 KB), and a few laid banks to
+# compare against (13.5 MB each -- only the controls are dumped).
+#
+# Kept apart from `android-engine.yml` on purpose: that one cross-compiles for aarch64 and takes
+# hours, and a workflow file's own push triggers every job in it.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'patches/apply_grain_dump.py'
+      - 'patches/apply_grain_cli.py'
+      - '.github/workflows/grain.yml'
+
+env:
+  FOTUFILM_REPO: DhaliwalX/fotufilm-engine
+  FOTUFILM_REF: b9049f3e8897a51ab8f917edb39f023cb340d2e2
+
+jobs:
+  grain:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    container: swift:6.3-jammy
+
+    steps:
+      - name: machine
+        run: |
+          swift --version
+          nproc; free -g | head -2
+
+      - name: checkout this probe
+        uses: actions/checkout@v4
+        with:
+          path: probe
+
+      - name: checkout fotufilm at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FOTUFILM_REPO }}
+          ref: ${{ env.FOTUFILM_REF }}
+          path: src
+
+      - name: apply the grain patches
+        run: |
+          cd src
+          python3 ../probe/patches/apply_spectral_cli.py .
+          python3 ../probe/patches/apply_grain_dump.py Sources/FotufilmCore/FilmGrain.swift
+          python3 ../probe/patches/apply_grain_cli.py .
+          echo "--- as it landed ---"
+          grep -n "records-" Sources/FotufilmCore/FilmGrain.swift | head -3
+          grep -n "grain-probe" Package.swift
+          ls Sources/grain-probe
+
+      - name: build grain-probe
+        env:
+          FOTUFILM_DISABLE_HALIDE: "1"
+        run: |
+          cd src
+          set -o pipefail
+          swift build -c release --product grain-probe 2>&1 | tail -40
+
+      - name: lay the populations
+        env:
+          FOTUFILM_DISABLE_HALIDE: "1"
+          FOTOFILM_FILM_TILE_BUILD: "swift"
+          FOTOFILM_BAKE_DIR: /tmp/out
+        run: |
+          cd src
+          BIN=$(swift build -c release --product grain-probe --show-bin-path)
+          mkdir -p /tmp/out
+          STOCKS=$(ls assets/fotufilm/Stocks/*.json 2>/dev/null || ls build/android-deps/stocks/*.json)
+          echo "stocks: $(echo "$STOCKS" | wc -l)"
+          for json in $STOCKS; do
+            stock=$(basename "$json" .json)
+            echo "== $stock"
+            FOTOFILM_BAKE_TAG="$stock" "$BIN/grain-probe" "$stock" /tmp/out records \
+              || echo "FAILED $stock"
+          done
+          ls /tmp/out | wc -l; du -sh /tmp/out
+
+      - name: lay the control tiles
+        env:
+          FOTUFILM_DISABLE_HALIDE: "1"
+          FOTOFILM_FILM_TILE_BUILD: "swift"
+          FOTOFILM_BAKE_DIR: /tmp/out
+        run: |
+          cd src
+          BIN=$(swift build -c release --product grain-probe --show-bin-path)
+          for stock in c200 acros100 provia100f; do
+            echo "== tiles $stock"
+            FOTOFILM_BAKE_TAG="$stock" "$BIN/grain-probe" "$stock" /tmp/out \
+              || echo "FAILED tiles $stock"
+          done
+          ls -la /tmp/out/*.f32; du -sh /tmp/out
+
+      - name: upload the bank
+        uses: actions/upload-artifact@v4
+        with:
+          name: grain-bank
+          path: /tmp/out
+          if-no-files-found: error
