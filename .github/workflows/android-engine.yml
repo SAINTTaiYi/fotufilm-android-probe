@@ -65,6 +65,9 @@ jobs:
         run: |
           cd src
           python3 ../probe/patches/apply_spectral_cli.py .
+          # Replaces that CLI with one that can also dump the camera matrices and the push
+          # conditions' curve slots, which the port must not re-derive by hand.
+          python3 ../probe/patches/apply_probe2.py .
           python3 ../probe/patches/apply_spectral_probe.py Sources/FotufilmCore/SpectralModel.swift
           git status --short | head -20
 
@@ -103,6 +106,16 @@ jobs:
           done
           ls -la /tmp/out | head -20
           du -sh /tmp/out
+
+      - name: dump camera profiles and push conditions
+        env:
+          FOTUFILM_DISABLE_HALIDE: "1"
+        run: |
+          cd src
+          BIN=$(swift build -c release --product spectral-probe --show-bin-path)
+          "$BIN/spectral-probe" --profiles /tmp/out/camera_profiles.bin
+          "$BIN/spectral-probe" --push /tmp/out/push_cfg.bin
+          ls -la /tmp/out/*.bin
 
       - name: upload tables
         uses: actions/upload-artifact@v4
