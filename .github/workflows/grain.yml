@@ -58,6 +58,7 @@ jobs:
           python3 ../probe/patches/apply_spectral_cli.py .
           python3 ../probe/patches/apply_grain_dump.py Sources/FotufilmCore/FilmGrain.swift
           python3 ../probe/patches/apply_grain_cli.py .
+          python3 ../probe/patches/apply_balance_detail.py .
           echo "--- as it landed ---"
           grep -n "records-" Sources/FotufilmCore/FilmGrain.swift | head -3
           grep -n "grain-probe" Package.swift
