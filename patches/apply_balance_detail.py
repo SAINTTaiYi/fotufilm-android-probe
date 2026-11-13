@@ -27,7 +27,7 @@ BAL_DUMP = """        if ProcessInfo.processInfo.environment["FOTOFILM_BALANCE_D
             print(String(format: "midenergy %@ %@ %.7f %.7f %.7f", stock.name, paper.rawValue,
                          midEnergy.x, midEnergy.y, midEnergy.z))
             print(String(format: "xmids %@ %@ %.7f %.7f %.7f", stock.name, paper.rawValue,
-                         xMids.x, xMids.y, xMids.z))
+                         xMids[0], xMids[1], xMids[2]))
             for (i, r) in relatives.enumerated() where i % 10 == 0 {
                 print(String(format: "rel %@ %@ %d %.7f %.7f %.7f", stock.name, paper.rawValue,
                              i, r.x, r.y, r.z))
