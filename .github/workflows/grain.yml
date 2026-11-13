@@ -73,7 +73,6 @@ jobs:
       - name: lay the populations
         env:
           FOTOFILM_BALANCE_DUMP: "1"
-        env:
           FOTUFILM_DISABLE_HALIDE: "1"
           FOTOFILM_FILM_TILE_BUILD: "swift"
           FOTOFILM_BAKE_DIR: /tmp/out
