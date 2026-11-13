@@ -53,6 +53,18 @@ for id in stockIDs {
     }
     // The population's dump is keyed by this, so it lands beside the tiles.
     setenv("FOTOFILM_BAKE_TAG", id, 1)
+    // The printing balance the `printCorrection` control scales: three numbers a sheet,
+    // from a forty-one-stop wedge solved neutral. A host re-deriving them has to land on
+    // these, so they are printed beside the population.
+    if ProcessInfo.processInfo.environment["FOTOFILM_BALANCE_DUMP"] != nil {
+        for paperName in ["crystal-archive", "endura-premier", "vision-2383", "ilfochrome-cps-1k"] {
+            if let sheet = PrintPaper(rawValue: paperName) {
+                let scale = stock.printingContrastScale(correction: 1, paper: sheet)
+                print(String(format: "balance %@ %@ %.6f %.6f %.6f", id, paperName,
+                             scale[0], scale[1], scale[2]))
+            }
+        }
+    }
     let started = Date()
     let population = FilmGrain(stock: stock)
     let populationSeconds = -started.timeIntervalSinceNow
