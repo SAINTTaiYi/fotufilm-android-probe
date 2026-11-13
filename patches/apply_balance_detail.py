@@ -53,7 +53,7 @@ def patch(path, anchor, replacement, tag):
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "src"
     path = f"{root}/Sources/FotufilmCore/SpectralModel.swift"
-    patch(path, TRIM_ANCHOR, TRIM_DUMP, "trim")
+    patch(path, TRIM_ANCHOR, TRIM_DUMP, "trim %@ %.7f")
     patch(path, BAL_ANCHOR, BAL_DUMP, "balance detail")
 
 
