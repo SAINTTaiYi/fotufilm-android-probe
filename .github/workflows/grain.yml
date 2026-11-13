@@ -72,6 +72,8 @@ jobs:
 
       - name: lay the populations
         env:
+          FOTOFILM_BALANCE_DUMP: "1"
+        env:
           FOTUFILM_DISABLE_HALIDE: "1"
           FOTOFILM_FILM_TILE_BUILD: "swift"
           FOTOFILM_BAKE_DIR: /tmp/out
@@ -79,8 +81,14 @@ jobs:
           cd src
           BIN=$(swift build -c release --product grain-probe --show-bin-path)
           mkdir -p /tmp/out
-          # The pack resolves through the SwiftPM bundle, so no directory goes in.
-          "$BIN/grain-probe" all /tmp/out records
+          STOCKS=$(ls assets/fotufilm/Stocks/*.json 2>/dev/null || ls build/android-deps/stocks/*.json)
+          echo "stocks: $(echo "$STOCKS" | wc -l)"
+          for json in $STOCKS; do
+            stock=$(basename "$json" .json)
+            echo "== $stock"
+            FOTOFILM_BAKE_TAG="$stock" "$BIN/grain-probe" "$stock" /tmp/out records \
+              || echo "FAILED $stock"
+          done
           ls /tmp/out | wc -l; du -sh /tmp/out
 
       - name: lay the control tiles
