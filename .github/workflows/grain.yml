@@ -16,6 +16,7 @@ on:
     branches: [ main ]
     paths:
       - 'patches/apply_grain_dump.py'
+      - 'patches/apply_balance_detail.py'
       - 'patches/apply_grain_cli.py'
       - '.github/workflows/grain.yml'
 
